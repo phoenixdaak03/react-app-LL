@@ -4,6 +4,8 @@ import {
   RouterProvider,
 } from "react-router-dom";
 
+import axios from 'axios';
+
 import './App.css'
 import HomePage from './pages/HomePage'
 import AboutPage from './pages/AboutPage';
@@ -30,6 +32,9 @@ const routes = [{
   {
     path: 'articles/:name', // Dynamic route for article pages
     element: <ArticlePage />,
+    loader: async function(){
+      await axios.get('/api/articles/learn-node')
+    }
   }]
 }]
 
