@@ -73,7 +73,7 @@ app.post('/api/articles/:name/comments', async function(req, res) {
 
 async function start(){
     await connectToDatabase();
-    app.listen(3000, function(){
+    app.listen(8000, function(){
     console.log('Server is listening on port 3000');
     });
 }
