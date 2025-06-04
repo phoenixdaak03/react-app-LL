@@ -1,5 +1,22 @@
-import express from 'express';
+import express, { response } from 'express';
 import { MongoClient, ServerApiVersion } from 'mongodb';
+import admin from 'firebase-admin';
+import fs from 'fs';
+import { runInNewContext } from 'vm';
+import path from 'path';
+
+import { fileURLToPath } from 'url';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const credentials = JSON.parse(
+    fs.readFileSync('./credentials.json')
+);
+
+admin.initializeApp({
+    credential: admin.credential.cert(credentials)
+});
+
 
 const articleInfo = [
     {
@@ -27,7 +44,9 @@ app.use(express.json());
 let db;
 
 async function connectToDatabase() {
-    const uri = 'mongodb://127.0.0.1:27017';
+    const uri = !process.env.MONGODB_USERNAME 
+    ? 'mongodb://127.0.0.1:27017'
+    : `mongodb+srv://${process.env.MONGODB_USERNAME}:${process.env.MONGODB_PASSWORD}@cluster0.vp2murv.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`
 
     const client = new MongoClient(uri, {
         serverAPI: {
@@ -39,7 +58,14 @@ async function connectToDatabase() {
 
     await client.connect();
 
-    db = client.db('full-stack-react-db');}
+    db = client.db('full-stack-react-db');
+}
+
+app.use(express.static(path.join(__dirname, '../dist')));
+
+app.get(/^(?!\/api).+/, (req, res) => {
+    res.sendFile(path.join(__dirname, '../dist', 'index.html'))
+})
 
 app.get('/api/articles/:name', async (req, res) => {
     const { name } = req.params;
@@ -47,18 +73,46 @@ app.get('/api/articles/:name', async (req, res) => {
     res.json(article);
 });
 
-app.post('/api/articles/:name/upvote', async function(req, res) {
-    const { name } = req.params;
-   const updatedArticle = await db.collection('articles').findOneAndUpdate({ name }, {
-    $inc: { upvotes: 1 }
-   }, {
-    returnDocument: 'after',
-   });
+app.use(async function (req, res, next) {
+    const { authtoken } = req.headers;
 
-   res.json(updatedArticle);
+    if (authtoken) {
+        const user = await admin.auth().verifyIdToken(authtoken);
+        req.user = user;
+        next();
+    } else {
+        res.sendStatues(400);
+    }
+
+   
 });
 
-app.post('/api/articles/:name/comments', async function(req, res) {
+app.post('/api/articles/:name/upvote', async function (req, res) {
+    const { name } = req.params;
+    const { uid } = req.user;
+
+    const article = await db.collection('articles').findOne({ name });
+
+    const upvoteIds = article.upvoteIds || [];
+    const canUpvote = uid && !upvoteIds.includes(uid);
+    if (canUpvote) {
+        const updatedArticle = await db.collection('articles').findOneAndUpdate({ name }, {
+            $inc: { upvotes: 1 },
+            $push: { upvoteIds: uid },
+        }, {
+            returnDocument: 'after',
+        });
+        res.json(updatedArticle);
+    } else {
+        res.sendStatus(403);
+    }
+
+
+
+
+});
+
+app.post('/api/articles/:name/comments', async function (req, res) {
     const { name } = req.params;
     const { postedBy, text } = req.body;
 
@@ -71,10 +125,12 @@ app.post('/api/articles/:name/comments', async function(req, res) {
     res.json(updatedArticle);
 });
 
-async function start(){
+const PORT = process.env.PORT || 8000;
+
+async function start() {
     await connectToDatabase();
-    app.listen(3000, function(){
-    console.log('Server is listening on port 3000');
+    app.listen(PORT, function () {
+        console.log('Server is listening on port ' + PORT);
     });
 }
 
